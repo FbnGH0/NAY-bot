@@ -1,0 +1,5 @@
+# One line per response. {name} = the person who answered for you.
+# Lines starting with # are ignored. Replace these with your own.
+Not asking you, {name}.
+{name}, was your name in the question?
+No one asked for you, {name}.

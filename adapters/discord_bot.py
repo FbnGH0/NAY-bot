@@ -10,7 +10,6 @@ from core.logic import NayEngine, load_insults, parse_ids
 load_dotenv()
 
 engine = NayEngine(
-    owner_id=int(os.environ["DISCORD_OWNER_ID"]),
     targets=parse_ids(os.getenv("DISCORD_TARGETS")),
     insults=load_insults(),
     window_sec=int(os.getenv("WINDOW_SEC", 600)),
@@ -42,7 +41,7 @@ async def on_message(message: discord.Message):
                 ref_msg = await message.channel.fetch_message(ref.message_id)
             except discord.HTTPException:
                 ref_msg = None
-        if ref_msg:
+        if ref_msg and not ref_msg.author.bot:
             reply_to_sender = ref_msg.author.id
 
     response = engine.on_message(

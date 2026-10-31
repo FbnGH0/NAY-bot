@@ -1,13 +1,13 @@
 """
 NAY bot core logic (platform-independent).
 
-Rule:
-  1. OWNER sends a message.
-  2. Someone REPLIES to that message with a question  -> question is "open".
-  3. A third person REPLIES to that question before OWNER does -> NAY.
+Rule (protects everyone in the chat):
+  1. Person A sends a message.
+  2. Person B REPLIES to A's message with a question -> question is "open" (for A).
+  3. Person C (on the TARGETS list) REPLIES to that question before A does -> NAY C.
 
-Questions sent to OWNER out of nowhere (not a reply to OWNER's message)
-are ignored, so anyone can answer them.
+Questions sent out of nowhere (not a reply to someone's message) are ignored,
+so anyone can answer them. An empty TARGETS list NAYs anyone.
 """
 
 import random
@@ -40,14 +40,14 @@ def is_question(text: str) -> bool:
 
 @dataclass
 class OpenQuestion:
-    asker_id: int
+    asker_id: int      # who asked
+    for_id: int        # who the question is for (author of the original message)
     opened_at: float
 
 
 class NayEngine:
-    def __init__(self, owner_id, targets=None, insults=None,
+    def __init__(self, targets=None, insults=None,
                  window_sec=600, cooldown_sec=60, clock=time.time):
-        self.owner_id = owner_id
         self.targets = set(targets or [])      # empty = NAY anyone
         self.insults = insults or ["NAY. Not asking you, {name}."]
         self.window_sec = window_sec
@@ -64,36 +64,44 @@ class NayEngine:
     def on_message(self, chat_id, msg_id, sender_id, text,
                    reply_to_msg_id=None, reply_to_sender_id=None,
                    sender_name="bro"):
-        """Feed every message in. Returns a NAY string, or None."""
+        """Feed every message in. Returns a NAY string, or None.
+
+        reply_to_sender_id should be None if the replied-to message is from a bot.
+        """
         self._cleanup()
         key = (chat_id, reply_to_msg_id) if reply_to_msg_id else None
-
-        # Owner answers their own question -> close it
-        if sender_id == self.owner_id:
-            if key in self.open:
-                del self.open[key]
-            return None
-
-        # Someone asks owner a question about owner's message -> open it
-        if reply_to_sender_id == self.owner_id and is_question(text):
-            self.open[(chat_id, msg_id)] = OpenQuestion(sender_id, self.clock())
-            return None
 
         # Someone replies to an open question
         if key in self.open:
             q = self.open[key]
+            if sender_id == q.for_id:
+                del self.open[key]               # the right person answered
+                return None
             if sender_id == q.asker_id:
                 return None                      # asker adding on, fine
-            if self.targets and sender_id not in self.targets:
+            if not self.can_nay(sender_id):
                 return None                      # not on the NAY list
             now = self.clock()
             if now - self.last_nay.get(chat_id, 0) < self.cooldown_sec:
                 return None                      # cooldown
             del self.open[key]
             self.last_nay[chat_id] = now
-            return random.choice(self.insults).format(name=sender_name)
+            return self.pick_insult(sender_name)
+
+        # Someone asks a question about another person's message -> open it
+        if (reply_to_sender_id is not None and reply_to_sender_id != sender_id
+                and is_question(text)):
+            self.open[(chat_id, msg_id)] = OpenQuestion(
+                sender_id, reply_to_sender_id, self.clock())
 
         return None
+
+    def can_nay(self, user_id):
+        """Empty target list = anyone can be NAY'd."""
+        return not self.targets or user_id in self.targets
+
+    def pick_insult(self, name):
+        return random.choice(self.insults).format(name=name)
 
 
 def load_insults(path=None):
